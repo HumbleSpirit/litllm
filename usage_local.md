@@ -19,3 +19,4 @@ docker run -d \
   -p 8080:8080 \
   litellm-gateway:latest
 ```
+### 2. Open in browser http://localhost:8080
