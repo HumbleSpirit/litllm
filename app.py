@@ -1,0 +1,335 @@
+import os
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+import litellm
+from litellm import completion
+import json
+
+app = FastAPI(title="LiteLLM Gateway", version="1.0.0")
+
+# Configure LiteLLM
+litellm.set_verbose = os.getenv("LITELLM_VERBOSE", "False").lower() == "true"
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    model: str
+    messages: List[ChatMessage]
+    max_tokens: Optional[int] = 256
+    temperature: Optional[float] = 0.7
+    stream: Optional[bool] = False
+
+class SimpleRequest(BaseModel):
+    prompt: str
+    model: Optional[str] = None
+    max_tokens: Optional[int] = 256
+    temperature: Optional[float] = 0.7
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize LiteLLM configuration"""
+    print("🚀 LiteLLM Gateway starting...")
+    print(f"Available models configured via environment variables")
+    
+    # LiteLLM automatically uses API keys from environment:
+    # OPENAI_API_KEY, AZURE_API_KEY, ANTHROPIC_API_KEY, etc.
+    
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Serve simple web UI"""
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>LiteLLM Chat Interface</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                padding: 20px;
+            }
+            .container {
+                background: white;
+                border-radius: 16px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                width: 100%;
+                max-width: 800px;
+                height: 600px;
+                display: flex;
+                flex-direction: column;
+            }
+            .header {
+                padding: 20px;
+                border-bottom: 1px solid #e0e0e0;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border-radius: 16px 16px 0 0;
+            }
+            .header h1 { font-size: 24px; margin-bottom: 8px; }
+            .header p { opacity: 0.9; font-size: 14px; }
+            .messages {
+                flex: 1;
+                overflow-y: auto;
+                padding: 20px;
+                background: #f5f5f5;
+            }
+            .message {
+                margin-bottom: 16px;
+                display: flex;
+                gap: 12px;
+            }
+            .message.user { justify-content: flex-end; }
+            .message-content {
+                max-width: 70%;
+                padding: 12px 16px;
+                border-radius: 12px;
+                word-wrap: break-word;
+            }
+            .message.user .message-content {
+                background: #667eea;
+                color: white;
+            }
+            .message.assistant .message-content {
+                background: white;
+                border: 1px solid #e0e0e0;
+            }
+            .input-area {
+                padding: 20px;
+                border-top: 1px solid #e0e0e0;
+                background: white;
+                border-radius: 0 0 16px 16px;
+            }
+            .model-selector {
+                margin-bottom: 12px;
+            }
+            .model-selector select {
+                width: 100%;
+                padding: 8px 12px;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                font-size: 14px;
+            }
+            .input-group {
+                display: flex;
+                gap: 12px;
+            }
+            input[type="text"] {
+                flex: 1;
+                padding: 12px 16px;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                font-size: 14px;
+            }
+            button {
+                padding: 12px 24px;
+                background: #667eea;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 600;
+                transition: background 0.2s;
+            }
+            button:hover { background: #5568d3; }
+            button:disabled { 
+                background: #ccc;
+                cursor: not-allowed;
+            }
+            .loading {
+                text-align: center;
+                padding: 12px;
+                color: #666;
+                font-style: italic;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🤖 LiteLLM Gateway</h1>
+                <p>Chat with AI models via LiteLLM proxy</p>
+            </div>
+            
+            <div class="messages" id="messages">
+                <div class="message assistant">
+                    <div class="message-content">
+                        Hello! I'm ready to help. Ask me anything!
+                    </div>
+                </div>
+            </div>
+            
+            <div class="input-area">
+                <div class="model-selector">
+                    <select id="modelSelect">
+                        <option value="gpt-3.5-turbo">GPT-3.5 Turbo (OpenAI)</option>
+                        <option value="gpt-4">GPT-4 (OpenAI)</option>
+                        <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Anthropic)</option>
+                        <option value="azure/gpt-4">Azure GPT-4</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <input type="text" id="messageInput" placeholder="Type your message..." />
+                    <button onclick="sendMessage()" id="sendBtn">Send</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const messagesDiv = document.getElementById('messages');
+            const messageInput = document.getElementById('messageInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const modelSelect = document.getElementById('modelSelect');
+
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendMessage();
+            });
+
+            function addMessage(role, content) {
+                const msgDiv = document.createElement('div');
+                msgDiv.className = `message ${role}`;
+                msgDiv.innerHTML = `<div class="message-content">${escapeHtml(content)}</div>`;
+                messagesDiv.appendChild(msgDiv);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            async function sendMessage() {
+                const message = messageInput.value.trim();
+                if (!message) return;
+
+                const model = modelSelect.value;
+                
+                addMessage('user', message);
+                messageInput.value = '';
+                sendBtn.disabled = true;
+
+                const loadingDiv = document.createElement('div');
+                loadingDiv.className = 'loading';
+                loadingDiv.textContent = 'Thinking...';
+                messagesDiv.appendChild(loadingDiv);
+
+                try {
+                    const response = await fetch('/v1/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: message,
+                            model: model,
+                            max_tokens: 512,
+                            temperature: 0.7
+                        })
+                    });
+
+                    loadingDiv.remove();
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        addMessage('assistant', `Error: ${error.detail || 'Unknown error'}`);
+                        return;
+                    }
+
+                    const data = await response.json();
+                    addMessage('assistant', data.response);
+                    
+                } catch (error) {
+                    loadingDiv.remove();
+                    addMessage('assistant', `Error: ${error.message}`);
+                } finally {
+                    sendBtn.disabled = false;
+                    messageInput.focus();
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {"status": "healthy", "service": "litellm-gateway"}
+
+@app.get("/ready")
+async def ready():
+    """Readiness check"""
+    return {"ready": True, "service": "litellm-gateway"}
+
+@app.post("/v1/chat")
+async def chat_simple(req: SimpleRequest):
+    """Simplified chat endpoint for web UI"""
+    try:
+        model = req.model or os.getenv("DEFAULT_MODEL", "gpt-3.5-turbo")
+        
+        response = completion(
+            model=model,
+            messages=[{"role": "user", "content": req.prompt}],
+            max_tokens=req.max_tokens,
+            temperature=req.temperature
+        )
+        
+        return {
+            "response": response.choices[0].message.content,
+            "model": model,
+            "usage": response.usage
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/v1/chat/completions")
+async def chat_completions(req: ChatRequest):
+    """OpenAI-compatible chat completions endpoint"""
+    try:
+        messages = [{"role": msg.role, "content": msg.content} for msg in req.messages]
+        
+        response = completion(
+            model=req.model,
+            messages=messages,
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+            stream=req.stream
+        )
+        
+        if req.stream:
+            async def generate():
+                for chunk in response:
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(generate(), media_type="text/event-stream")
+        
+        return response
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/v1/models")
+async def list_models():
+    """List available models"""
+    return {
+        "object": "list",
+        "data": [
+            {"id": "gpt-3.5-turbo", "object": "model"},
+            {"id": "gpt-4", "object": "model"},
+            {"id": "claude-3-5-sonnet-20241022", "object": "model"},
+            {"id": "azure/gpt-4", "object": "model"}
+        ]
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)
