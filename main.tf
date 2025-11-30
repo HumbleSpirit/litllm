@@ -135,7 +135,39 @@ resource "azurerm_linux_web_app" "app" {
   }
 }
 
-# Outputs
+// Post-deployment: Build and push Docker image
+resource "null_resource" "docker_build_push" {
+  # Trigger on changes to app code or ACR
+  triggers = {
+    app_py_hash     = filemd5("${path.module}/app.py")
+    dockerfile_hash = filemd5("${path.module}/dockerfile")
+    acr_id          = azurerm_container_registry.acr.id
+    webapp_id       = azurerm_linux_web_app.app.id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Building and pushing Docker image..."
+      az acr build --registry ${azurerm_container_registry.acr.name} \
+        --image litellm:latest \
+        --file dockerfile .
+      
+      echo "Restarting web app..."
+      az webapp restart \
+        --name ${azurerm_linux_web_app.app.name} \
+        --resource-group ${azurerm_resource_group.rg.name}
+      
+      echo "Deployment complete!"
+    EOT
+  }
+
+  depends_on = [
+    azurerm_linux_web_app.app,
+    azurerm_container_registry.acr
+  ]
+}
+
+// Outputs
 output "openai_endpoint" {
   value = azurerm_cognitive_account.openai.endpoint
 }
