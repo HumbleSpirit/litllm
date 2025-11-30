@@ -40,6 +40,7 @@ az provider register --namespace Microsoft.ContainerRegistry
 az provider register --namespace Microsoft.ContainerInstance
 az provider register --namespace Microsoft.Web
 az provider register -n Microsoft.OperationalInsights --wait
+az provider register -n Microsoft.AzureTerraform
 
 # 4. Create Resource Group & ACR
 echo -e "${GREEN}Creating Resource Group & ACR...${NC}"
