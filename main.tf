@@ -12,7 +12,7 @@ provider "azurerm" {
 }
 
 variable "resource_group_name" {
-  default = "Sprint1-Fresh"
+  default = "Sprint1-Terraform"
 }
 
 variable "location" {
@@ -61,8 +61,8 @@ resource "azurerm_cognitive_deployment" "gpt4" {
     version = "2024-11-20"
   }
 
-  sku {
-    name     = "Standard"
+  scale {
+    type     = "Standard"
     capacity = 10
   }
 }
@@ -78,8 +78,8 @@ resource "azurerm_cognitive_deployment" "gpt35" {
     version = "2024-07-18"
   }
 
-  sku {
-    name     = "GlobalStandard"
+  scale {
+    type     = "Standard"
     capacity = 10
   }
 
