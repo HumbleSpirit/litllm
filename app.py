@@ -39,6 +39,14 @@ async def startup_event():
     # LiteLLM automatically uses API keys from environment:
     # OPENAI_API_KEY, AZURE_API_KEY, ANTHROPIC_API_KEY, etc.
     
+    # Configure Azure Foundry specific mappings if needed
+    # This is a basic setup; for more complex routing, LiteLLM's router or config.yaml is better.
+    # Here we assume environment variables are set for the default Azure provider if used directly,
+    # or we rely on LiteLLM's ability to handle multiple azure configs if properly named.
+    # For simplicity in this script, we'll assume the user sets AZURE_API_KEY/BASE etc for one main azure account
+    # OR uses specific model names that LiteLLM recognizes if they map to different env vars.
+    pass
+    
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Serve simple web UI"""
@@ -176,6 +184,7 @@ async def root():
                         <option value="gpt-4">GPT-4 (OpenAI)</option>
                         <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Anthropic)</option>
                         <option value="azure/gpt-4">Azure GPT-4</option>
+                        <option value="azure/gpt-5">Azure GPT-5</option>
                     </select>
                 </div>
                 <div class="input-group">
@@ -276,12 +285,39 @@ async def chat_simple(req: SimpleRequest):
     try:
         model = req.model or os.getenv("DEFAULT_MODEL", "gpt-3.5-turbo")
         
-        response = completion(
-            model=model,
-            messages=[{"role": "user", "content": req.prompt}],
-            max_tokens=req.max_tokens,
-            temperature=req.temperature
-        )
+        kwargs = {
+            "model": model,
+            "messages": [{"role": "user", "content": req.prompt}],
+            "max_tokens": req.max_tokens,
+            "temperature": req.temperature
+        }
+        
+        # Inject Azure Foundry credentials if using Azure models
+        if model.startswith("azure/"):
+            if "gpt-4" in model:
+                api_key = os.getenv("AZURE_FOUNDRY_API_KEY")
+                api_base = os.getenv("AZURE_FOUNDRY_API_BASE")
+                api_version = os.getenv("AZURE_FOUNDRY_API_VERSION")
+                deployment = os.getenv("AZURE_GPT4_DEPLOYMENT", "gpt-4")
+                
+                # Use 'azure' provider for Standard Azure resources
+                kwargs["model"] = f"azure/{deployment}"
+                kwargs["api_key"] = api_key
+                kwargs["api_base"] = api_base
+                kwargs["api_version"] = api_version
+                
+            elif "gpt-5" in model:
+                api_key = os.getenv("AZURE_FOUNDRY_API_KEY")
+                api_base = os.getenv("AZURE_FOUNDRY_API_BASE")
+                api_version = os.getenv("AZURE_FOUNDRY_API_VERSION")
+                deployment = os.getenv("AZURE_GPT5_DEPLOYMENT", "gpt-5")
+                
+                kwargs["model"] = f"azure/{deployment}"
+                kwargs["api_key"] = api_key
+                kwargs["api_base"] = api_base
+                kwargs["api_version"] = api_version
+
+        response = completion(**kwargs)
         
         return {
             "response": response.choices[0].message.content,
@@ -297,13 +333,45 @@ async def chat_completions(req: ChatRequest):
     try:
         messages = [{"role": msg.role, "content": msg.content} for msg in req.messages]
         
-        response = completion(
-            model=req.model,
-            messages=messages,
-            max_tokens=req.max_tokens,
-            temperature=req.temperature,
-            stream=req.stream
-        )
+        kwargs = {
+            "model": req.model,
+            "messages": messages,
+            "max_tokens": req.max_tokens,
+            "temperature": req.temperature,
+            "stream": req.stream
+        }
+
+        # Inject Azure Foundry credentials if using Azure models
+        if req.model.startswith("azure/"):
+            if "gpt-4" in req.model:
+                api_key = os.getenv("AZURE_FOUNDRY_API_KEY")
+                api_base = os.getenv("AZURE_FOUNDRY_API_BASE")
+                api_version = os.getenv("AZURE_FOUNDRY_API_VERSION")
+                deployment = os.getenv("AZURE_GPT4_DEPLOYMENT", "gpt-4")
+                
+                print(f"DEBUG: Using Foundry Config for GPT-4. Base: {api_base}, Deployment: {deployment}")
+                
+                # Use 'azure' provider for Standard Azure resources (created by setup script)
+                # This ensures 'api-key' header is used, not 'Authorization: Bearer'
+                kwargs["model"] = f"azure/{deployment}"
+                kwargs["api_key"] = api_key
+                kwargs["api_base"] = api_base
+                kwargs["api_version"] = api_version
+                
+            elif "gpt-5" in req.model:
+                api_key = os.getenv("AZURE_FOUNDRY_API_KEY")
+                api_base = os.getenv("AZURE_FOUNDRY_API_BASE")
+                api_version = os.getenv("AZURE_FOUNDRY_API_VERSION")
+                deployment = os.getenv("AZURE_GPT5_DEPLOYMENT", "gpt-5")
+                
+                print(f"DEBUG: Using Foundry Config for GPT-5. Base: {api_base}, Deployment: {deployment}")
+                
+                kwargs["model"] = f"azure/{deployment}"
+                kwargs["api_key"] = api_key
+                kwargs["api_base"] = api_base
+                kwargs["api_version"] = api_version
+
+        response = completion(**kwargs)
         
         if req.stream:
             async def generate():
@@ -326,7 +394,8 @@ async def list_models():
             {"id": "gpt-3.5-turbo", "object": "model"},
             {"id": "gpt-4", "object": "model"},
             {"id": "claude-3-5-sonnet-20241022", "object": "model"},
-            {"id": "azure/gpt-4", "object": "model"}
+            {"id": "azure/gpt-4", "object": "model"},
+            {"id": "azure/gpt-5", "object": "model"}
         ]
     }
 

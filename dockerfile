@@ -1,12 +1,11 @@
-FROM python:3.11-bookworm-slim
+FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Fast Debian mirror (Germany)
-RUN sed -i 's|deb.debian.org|ftp.de.debian.org|g' /etc/apt/sources.list
+
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
