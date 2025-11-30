@@ -55,11 +55,12 @@ async def root():
     <html>
     <head>
         <title>LiteLLM Chat Interface</title>
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body {
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
                 min-height: 100vh;
                 display: flex;
                 justify-content: center;
@@ -71,17 +72,22 @@ async def root():
                 border-radius: 16px;
                 box-shadow: 0 20px 60px rgba(0,0,0,0.3);
                 width: 100%;
-                max-width: 800px;
-                height: 600px;
+                max-width: 1200px;
+                height: 80vh;
+                min-height: 500px;
+                max-height: 900px;
                 display: flex;
                 flex-direction: column;
+                resize: both;
+                overflow: hidden;
             }
             .header {
                 padding: 20px;
                 border-bottom: 1px solid #e0e0e0;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
                 color: white;
                 border-radius: 16px 16px 0 0;
+                flex-shrink: 0;
             }
             .header h1 { font-size: 24px; margin-bottom: 8px; }
             .header p { opacity: 0.9; font-size: 14px; }
@@ -95,6 +101,11 @@ async def root():
                 margin-bottom: 16px;
                 display: flex;
                 gap: 12px;
+                animation: fadeIn 0.3s ease-in;
+            }
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
             }
             .message.user { justify-content: flex-end; }
             .message-content {
@@ -102,20 +113,75 @@ async def root():
                 padding: 12px 16px;
                 border-radius: 12px;
                 word-wrap: break-word;
+                line-height: 1.5;
             }
             .message.user .message-content {
-                background: #667eea;
+                background: #48bb78;
                 color: white;
             }
             .message.assistant .message-content {
                 background: white;
                 border: 1px solid #e0e0e0;
+                color: #333;
+            }
+            .message-content h1, .message-content h2, .message-content h3 {
+                margin-top: 12px;
+                margin-bottom: 8px;
+            }
+            .message-content h1 { font-size: 1.5em; }
+            .message-content h2 { font-size: 1.3em; }
+            .message-content h3 { font-size: 1.1em; }
+            .message-content p { margin-bottom: 8px; }
+            .message-content ul, .message-content ol {
+                margin-left: 20px;
+                margin-bottom: 8px;
+            }
+            .message-content li { margin-bottom: 4px; }
+            .message-content pre {
+                background: #2d2d2d;
+                color: #f8f8f2;
+                padding: 12px;
+                border-radius: 6px;
+                overflow-x: auto;
+                margin: 8px 0;
+            }
+            .message-content code {
+                background: #f0f0f0;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-family: 'Courier New', monospace;
+                font-size: 0.9em;
+            }
+            .message-content pre code {
+                background: transparent;
+                padding: 0;
+            }
+            .message-content blockquote {
+                border-left: 4px solid #48bb78;
+                padding-left: 12px;
+                margin: 8px 0;
+                color: #666;
+            }
+            .message-content table {
+                border-collapse: collapse;
+                width: 100%;
+                margin: 8px 0;
+            }
+            .message-content th, .message-content td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: left;
+            }
+            .message-content th {
+                background: #f0f0f0;
+                font-weight: bold;
             }
             .input-area {
                 padding: 20px;
                 border-top: 1px solid #e0e0e0;
                 background: white;
                 border-radius: 0 0 16px 16px;
+                flex-shrink: 0;
             }
             .model-selector {
                 margin-bottom: 12px;
@@ -140,7 +206,7 @@ async def root():
             }
             button {
                 padding: 12px 24px;
-                background: #667eea;
+                background: #48bb78;
                 color: white;
                 border: none;
                 border-radius: 8px;
@@ -149,7 +215,7 @@ async def root():
                 font-weight: 600;
                 transition: background 0.2s;
             }
-            button:hover { background: #5568d3; }
+            button:hover { background: #38a169; }
             button:disabled { 
                 background: #ccc;
                 cursor: not-allowed;
@@ -160,19 +226,28 @@ async def root():
                 color: #666;
                 font-style: italic;
             }
+            .resize-handle {
+                position: absolute;
+                bottom: 0;
+                right: 0;
+                width: 20px;
+                height: 20px;
+                cursor: nwse-resize;
+            }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
                 <h1>🤖 LiteLLM Gateway</h1>
-                <p>Chat with AI models via LiteLLM proxy</p>
+                <p>Chat with AI models via LiteLLM proxy • Markdown supported</p>
             </div>
             
             <div class="messages" id="messages">
                 <div class="message assistant">
                     <div class="message-content">
-                        Hello! I'm ready to help. Ask me anything!
+                        <strong>Hello!</strong> I'm ready to help. Ask me anything!<br>
+                        <em>Responses support markdown formatting.</em>
                     </div>
                 </div>
             </div>
@@ -180,11 +255,9 @@ async def root():
             <div class="input-area">
                 <div class="model-selector">
                     <select id="modelSelect">
-                        <option value="gpt-3.5-turbo">GPT-3.5 Turbo (OpenAI)</option>
-                        <option value="gpt-4">GPT-4 (OpenAI)</option>
-                        <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Anthropic)</option>
                         <option value="azure/gpt-4">Azure GPT-4</option>
-                        <option value="azure/gpt-5">Azure GPT-5</option>
+                        <option value="azure/gpt-5">Azure GPT-3.5</option>
+                        <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Anthropic)</option>
                     </select>
                 </div>
                 <div class="input-group">
@@ -200,22 +273,37 @@ async def root():
             const sendBtn = document.getElementById('sendBtn');
             const modelSelect = document.getElementById('modelSelect');
 
-            messageInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') sendMessage();
+            // Configure marked options
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                headerIds: false,
+                mangle: false
             });
 
-            function addMessage(role, content) {
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+
+            function addMessage(role, content, isMarkdown = false) {
                 const msgDiv = document.createElement('div');
                 msgDiv.className = `message ${role}`;
-                msgDiv.innerHTML = `<div class="message-content">${escapeHtml(content)}</div>`;
+                
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                
+                if (isMarkdown && role === 'assistant') {
+                    contentDiv.innerHTML = marked.parse(content);
+                } else {
+                    contentDiv.textContent = content;
+                }
+                
+                msgDiv.appendChild(contentDiv);
                 messagesDiv.appendChild(msgDiv);
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
-            }
-
-            function escapeHtml(text) {
-                const div = document.createElement('div');
-                div.textContent = text;
-                return div.innerHTML;
             }
 
             async function sendMessage() {
@@ -240,7 +328,7 @@ async def root():
                         body: JSON.stringify({
                             prompt: message,
                             model: model,
-                            max_tokens: 512,
+                            max_tokens: 1024,
                             temperature: 0.7
                         })
                     });
@@ -254,7 +342,7 @@ async def root():
                     }
 
                     const data = await response.json();
-                    addMessage('assistant', data.response);
+                    addMessage('assistant', data.response, true);
                     
                 } catch (error) {
                     loadingDiv.remove();
@@ -268,6 +356,7 @@ async def root():
     </body>
     </html>
     """
+
 
 @app.get("/health")
 async def health():
