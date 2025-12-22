@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm-gateway
+  namespace: default
+  labels:
+    app: litellm-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: litellm-gateway
+  template:
+    metadata:
+      labels:
+        app: litellm-gateway
+    spec:
+      containers:
+        - name: litellm-gateway
+          image: <ACR_LOGIN_SERVER>/litellm:latest
+          imagePullPolicy: Always
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LITELLM_VERBOSE
+              value: "True"
+            - name: DEFAULT_MODEL
+              value: "azure/gpt-4"
+          envFrom:
+            - secretRef:
+                name: litellm-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm-gateway
+  namespace: default
+spec:
+  selector:
+    app: litellm-gateway
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: LoadBalancer

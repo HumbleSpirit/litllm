@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm-gateway
+  namespace: default
+  labels:
+    app: litellm-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm-gateway
+  template:
+    metadata:
+      labels:
+        app: litellm-gateway
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k3s-worker-3
+      containers:
+        - name: litellm-gateway
+          image: 192.168.178.189:5000/litellm-gateway:latest
+          imagePullPolicy: Always
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LITELLM_VERBOSE
+              value: "True"
+            - name: DEFAULT_MODEL
+              value: "gpt-5.2"
+          envFrom:
+            - secretRef:
+                name: litellm-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
